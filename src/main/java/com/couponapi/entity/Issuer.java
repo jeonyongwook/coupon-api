@@ -18,6 +18,9 @@ public class Issuer {
 
     private String name;
 
+    @Column(length = 30)
+    private String businessNo;
+
     private String status;  // OK, STOP, DEL
 
     @CreationTimestamp
@@ -28,8 +31,9 @@ public class Issuer {
     private LocalDateTime modDate;
 
     @Builder
-    public Issuer(String name, String businessNo) {
+    public Issuer(String name, String businessNo, String status) {
         this.name = name;
+        this.businessNo = businessNo;
         this.status = status != null ? status : "OK";
     }
 }

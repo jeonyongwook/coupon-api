@@ -17,8 +17,13 @@ import java.time.LocalDateTime;
 })
 public class OrderDetail {
 
+    // 주문 1건당 quantity(최대 1000)개까지 한 번에 생성되는 엔티티라 대량 insert가 잦다.
+    // IDENTITY 채번은 Hibernate가 insert 배치를 아예 못 하게 막기 때문에(각 insert마다 PK를
+    // 즉시 확인해야 함) SEQUENCE 채번(allocationSize=50, application.properties의
+    // hibernate.jdbc.batch_size=50과 동일하게 맞춤)으로 바꿔 실제 배치 insert가 걸리도록 했다.
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "order_detail_seq_gen")
+    @SequenceGenerator(name = "order_detail_seq_gen", sequenceName = "order_detail_seq", allocationSize = 50)
     private Long orderDetailSeq;
 
     @Column(nullable = false)

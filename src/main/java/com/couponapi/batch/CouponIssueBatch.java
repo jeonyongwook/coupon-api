@@ -54,7 +54,7 @@ public class CouponIssueBatch {
     //         이 보장이 없으면(예: fixedRate로 변경하거나 스케줄러를 멀티스레드로 돌리면)
     //         아직 처리 중(status=READY)인 같은 주문을 다음 회차가 또 집어서 발행처에
     //         핀을 중복으로 요청할 수 있다.
-    @Scheduled(fixedDelay = 10000)
+    @Scheduled(fixedDelay = 3 * 1000)
     public void processReadyOrders() {
         // 1. 배치 설정 가져오기
         Map<String, String> config = systemConfigService.getConfigMap(CONFIG_GROUP);
