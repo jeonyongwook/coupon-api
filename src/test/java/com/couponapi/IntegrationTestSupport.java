@@ -1,5 +1,6 @@
 package com.couponapi;
 
+import com.common.repository.SystemConfigRepository;
 import com.common.security.ApiKeyHasher;
 import com.couponapi.dto.OrderRequestDto;
 import com.couponapi.entity.Coupon;
@@ -32,9 +33,13 @@ abstract class IntegrationTestSupport {
     @Autowired protected CouponRepository couponRepository;
     @Autowired protected OrderRepository orderRepository;
     @Autowired protected OrderDetailRepository orderDetailRepository;
+    @Autowired protected SystemConfigRepository systemConfigRepository;
+    @Autowired protected ScriptedIssuerClient scriptedIssuer;
 
     @BeforeEach
     void resetData() {
+        scriptedIssuer.reset();
+        systemConfigRepository.deleteAllInBatch();
         orderDetailRepository.deleteAllInBatch();
         orderRepository.deleteAllInBatch();
         couponRepository.deleteAllInBatch();

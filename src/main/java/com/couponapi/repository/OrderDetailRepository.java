@@ -1,5 +1,6 @@
 package com.couponapi.repository;
 
+import com.couponapi.dto.IssueTarget;
 import com.couponapi.entity.OrderDetail;
 import com.couponapi.entity.OrderDetailStatus;
 import jakarta.persistence.LockModeType;
@@ -14,6 +15,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 
 @Repository
@@ -41,4 +43,13 @@ public interface OrderDetailRepository extends JpaRepository<OrderDetail, Long> 
                                @Param("processing") OrderDetailStatus processing,
                                @Param("threshold") LocalDateTime threshold,
                                @Param("now") LocalDateTime now);
+
+    /**
+     * 선점한 상세들의 발행 요청에 필요한 정보(발행처, 발행처 상품 코드, 유효일수)를 한 번에 조회한다.
+     * 주문 또는 쿠폰 상품을 찾을 수 없는 상세는 결과에서 빠진다.
+     */
+    @Query("select new com.couponapi.dto.IssueTarget(d.orderDetailSeq, c.issuerSeq, c.issuerGoodsCode, c.validDays) " +
+            "from OrderDetail d, OrderEntity o, Coupon c " +
+            "where d.orderDetailSeq in :ids and o.orderSeq = d.orderSeq and c.couponSeq = o.couponSeq")
+    List<IssueTarget> findIssueTargets(@Param("ids") Collection<Long> ids);
 }

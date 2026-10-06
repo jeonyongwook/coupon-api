@@ -40,7 +40,7 @@ class CouponIssueResultWriterTest extends IntegrationTestSupport {
         writer.applyFail(id);
         assertThat(reload(id).getStatus()).isEqualTo(OrderDetailStatus.ISSUE_FAIL);
 
-        writer.applySuccess(id, "PIN-LATE", "ISS-LATE");
+        writer.applySuccess(id, "PIN-LATE", "ISS-LATE", 30);
         OrderDetail upgraded = reload(id);
         assertThat(upgraded.getStatus()).isEqualTo(OrderDetailStatus.UNUSED);
         assertThat(upgraded.getPin()).isEqualTo("PIN-LATE");
@@ -55,8 +55,8 @@ class CouponIssueResultWriterTest extends IntegrationTestSupport {
         Order order = createOrder("W-002", 1);
         Long id = orderDetailRepository.findByOrderSeq(order.getOrderSeq()).get(0).getOrderDetailSeq();
 
-        writer.applySuccess(id, "PIN-FIRST", "ISS-FIRST");
-        writer.applySuccess(id, "PIN-SECOND", "ISS-SECOND");
+        writer.applySuccess(id, "PIN-FIRST", "ISS-FIRST", 30);
+        writer.applySuccess(id, "PIN-SECOND", "ISS-SECOND", 30);
 
         assertThat(reload(id).getPin()).isEqualTo("PIN-FIRST");
     }
@@ -71,7 +71,7 @@ class CouponIssueResultWriterTest extends IntegrationTestSupport {
 
         assertThat(writer.completeFinishedOrders()).isZero();
 
-        writer.applySuccess(first, "PIN-A", "ISS-A");
+        writer.applySuccess(first, "PIN-A", "ISS-A", 30);
         assertThat(writer.completeFinishedOrders()).isZero();
         assertThat(orderRepository.findById(order.getOrderSeq()).orElseThrow().getStatus())
                 .isEqualTo(OrderStatus.READY);

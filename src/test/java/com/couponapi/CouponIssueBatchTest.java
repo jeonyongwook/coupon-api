@@ -26,7 +26,7 @@ class CouponIssueBatchTest extends IntegrationTestSupport {
     void batchIssuesAllPinsAndCompletesOrder() {
         String trxId = orderService.createOrder(request("B-001", 3), API_KEY).getTrxId();
 
-        batch.processReadyOrders(); // 가짜 발행처 지연(최대 2초)이 끝날 때까지 블로킹
+        batch.processReadyOrders(); // 가짜 발행처 응답이 모두 올 때까지 블로킹
 
         Order order = orderRepository.findByTrxId(trxId).orElseThrow();
         List<OrderDetail> details = orderDetailRepository.findByOrderSeq(order.getOrderSeq());

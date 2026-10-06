@@ -1,6 +1,11 @@
 package com.couponapi.batch;
 
 import com.common.config.SystemConfigService;
+import com.couponapi.dto.IssueTarget;
+import com.couponapi.issuer.IssuerClient.IssueRequest;
+import com.couponapi.issuer.IssuerClient.IssuedPin;
+import com.couponapi.issuer.IssuerClientRegistry;
+import com.couponapi.repository.OrderDetailRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -11,7 +16,6 @@ import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
@@ -19,6 +23,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Component
@@ -30,6 +35,11 @@ public class CouponIssueBatch {
     private final CouponIssueClaimer claimer;
 
     private final CouponIssueResultWriter resultWriter;
+
+    private final OrderDetailRepository orderDetailRepository;
+
+    // 발행처(issuerSeq)에 맞는 발행처 클라이언트를 찾아 준다. (다중 발행처)
+    private final IssuerClientRegistry issuerClients;
 
     // AsyncConfig에 정의된 발행 전용 스레드풀 (CORE_POOL_SIZE / MAX_POOL_SIZE 설정과 연결됨)
     @Qualifier("couponExecutor")
@@ -84,18 +94,29 @@ public class CouponIssueBatch {
     private void issuePins(List<Long> orderDetailSeqs, Map<String, String> config) {
         long timeoutSec = systemConfigService.getIntOrDefault(config, "ISSUE_TIMEOUT_SEC", DEFAULT_ISSUE_TIMEOUT_SEC);
 
+        // 발행처, 발행처 상품 코드, 유효일수를 한 번에 조회한다.
+        Map<Long, IssueTarget> targets = orderDetailRepository.findIssueTargets(orderDetailSeqs).stream()
+                .collect(Collectors.toMap(IssueTarget::orderDetailSeq, Function.identity()));
+
         // 발행 요청을 먼저 모두 스레드풀에 던져서 병렬로 진행시킴
-        Map<Long, CompletableFuture<PinIssueResult>> futures = new LinkedHashMap<>();
+        Map<Long, CompletableFuture<IssuedPin>> futures = new LinkedHashMap<>();
         for (Long orderDetailSeq : orderDetailSeqs) {
-            futures.put(orderDetailSeq, submitIssueRequest(orderDetailSeq, timeoutSec));
+            IssueTarget target = targets.get(orderDetailSeq);
+            if (target == null) {
+                // 주문 또는 쿠폰 상품을 찾을 수 없으면 어느 발행처에 요청할지 알 수 없다. 다시 시도해도 소용이 없으므로 실패 처리한다.
+                log.error("발행 대상 정보(주문/쿠폰 상품)를 찾지 못해 실패 처리합니다: OrderDetailSeq = {}", orderDetailSeq);
+                applyFailSafely(orderDetailSeq);
+                continue;
+            }
+            futures.put(orderDetailSeq, submitIssueRequest(target, timeoutSec));
         }
 
         // 결과를 기다리며 반영 (반영 자체는 CouponIssueResultWriter의 짧은 트랜잭션에서 수행)
-        for (Map.Entry<Long, CompletableFuture<PinIssueResult>> entry : futures.entrySet()) {
+        for (Map.Entry<Long, CompletableFuture<IssuedPin>> entry : futures.entrySet()) {
             Long orderDetailSeq = entry.getKey();
             try {
-                PinIssueResult result = entry.getValue().get();
-                applySuccessSafely(orderDetailSeq, result);
+                IssuedPin result = entry.getValue().get();
+                applySuccessSafely(targets.get(orderDetailSeq), result);
             } catch (ExecutionException e) {
                 Throwable cause = e.getCause();
                 if (cause instanceof RejectedExecutionException) {
@@ -121,11 +142,11 @@ public class CouponIssueBatch {
     }
 
     /** 결과 반영 중 나는 예외(DB 제약 위반 등)를 이 건에서만 흡수한다. */
-    private void applySuccessSafely(Long orderDetailSeq, PinIssueResult result) {
+    private void applySuccessSafely(IssueTarget target, IssuedPin result) {
         try {
-            resultWriter.applySuccess(orderDetailSeq, result.pin(), result.issuerTrxId());
+            resultWriter.applySuccess(target.orderDetailSeq(), result.pin(), result.issuerTrxId(), target.validDaysOrDefault());
         } catch (Exception e) {
-            log.error("발행 성공 결과 반영 중 오류: OrderDetailSeq = {}", orderDetailSeq, e);
+            log.error("발행 성공 결과 반영 중 오류: OrderDetailSeq = {}", target.orderDetailSeq(), e);
         }
     }
 
@@ -154,18 +175,21 @@ public class CouponIssueBatch {
      *   그대로 살려두고 별도의 stage에만 타임아웃을 걸어, 원본이 늦게라도 성공하면
      *   그 결과를 자동으로 반영해 발행 결과가 유실되지 않도록 한다.
      */
-    private CompletableFuture<PinIssueResult> submitIssueRequest(Long orderDetailSeq, long timeoutSec) {
+    private CompletableFuture<IssuedPin> submitIssueRequest(IssueTarget target, long timeoutSec) {
+        Long orderDetailSeq = target.orderDetailSeq();
 
         // 작업이 스레드풀 큐에서 빠져나와 실제로 스레드를 잡고 "시작"되는 순간을 알리는 신호.
         // orTimeout()을 이 신호가 완료된 뒤(=실제 처리 시작 시점)에 걸어야, 타임아웃이
         // 제출(submit) 시점이 아니라 건별 실제 처리 시점부터 개별적으로 계산된다.
         CompletableFuture<Void> started = new CompletableFuture<>();
 
-        CompletableFuture<PinIssueResult> rawFuture;
+        CompletableFuture<IssuedPin> rawFuture;
         try {
             rawFuture = CompletableFuture.supplyAsync(() -> {
                 started.complete(null);
-                return requestPinFromIssuer(orderDetailSeq);
+                // 발행처 클라이언트를 못 찾거나 호출이 실패하면 예외가 되어 이 건만 ISSUE_FAIL로 처리된다.
+                return issuerClients.resolve(target.issuerSeq())
+                        .issue(new IssueRequest(orderDetailSeq, target.issuerSeq(), target.issuerGoodsCode()));
             }, couponExecutor);
         } catch (RejectedExecutionException e) {
             log.error("발행 요청 제출 실패(스레드풀 포화): OrderDetailSeq = {}", orderDetailSeq, e);
@@ -175,7 +199,7 @@ public class CouponIssueBatch {
         // rawFuture를 직접 orTimeout()에 넘기면 rawFuture 자신이 타임아웃으로 완료되어버려
         // 이후 실제 응답이 와도 반영할 방법이 없어진다. thenApply로 별도 stage를 만들어
         // 거기에만 타임아웃을 건다.
-        CompletableFuture<PinIssueResult> guarded = started.thenCompose(v ->
+        CompletableFuture<IssuedPin> guarded = started.thenCompose(v ->
                 rawFuture.thenApply(Function.identity()).orTimeout(timeoutSec, TimeUnit.SECONDS));
 
         rawFuture.whenComplete((result, ex) -> {
@@ -184,35 +208,10 @@ public class CouponIssueBatch {
                 // 이 콜백은 issuePins()의 for문이 끝난 뒤 별도 워커 스레드에서 호출될 수 있으므로
                 // 여기서 예외가 나면 아무도 잡아주지 않는다. 반드시 흡수한다.
                 log.warn("지연 응답 도착(타임아웃 이후 발행 성공): OrderDetailSeq = {}", orderDetailSeq);
-                applySuccessSafely(orderDetailSeq, result);
+                applySuccessSafely(target, result);
             }
         });
 
         return guarded;
-    }
-
-    /**
-     * 발행처 API 연동 전이므로 가상의 핀을 생성하는 것으로 대체.
-     * 실제 발행처는 응답이 늦어질 수 있어 임의 지연을 흉내낸다.
-     */
-    private PinIssueResult requestPinFromIssuer(Long orderDetailSeq) {
-        try {
-            long fakeLatencyMs = 200 + (long) (Math.random() * 1800); // 발행처 응답 지연 시뮬레이션 (0.2~2초)
-            Thread.sleep(fakeLatencyMs);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("발행처 호출이 중단되었습니다.", e);
-        }
-
-        String mockPin = "PIN-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12).toUpperCase();
-        // 밀리초 시각은 병렬 스레드에서 충돌해 유니크 제약(issuerTrxId)을 깨뜨릴 수 있어 UUID를 사용한다.
-        String mockIssuerTrxId = "ISS-" + UUID.randomUUID().toString().replace("-", "").toUpperCase();
-        return new PinIssueResult(mockPin, mockIssuerTrxId);
-    }
-
-    /**
-     * 발행처로부터 받은 핀 발행 결과
-     */
-    private record PinIssueResult(String pin, String issuerTrxId) {
     }
 }

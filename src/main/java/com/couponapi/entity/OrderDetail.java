@@ -63,27 +63,52 @@ public class OrderDetail {
         this.status = status != null ? status : OrderDetailStatus.READY;
     }
 
+    // 상태 전이 규칙은 엔티티가 스스로 지킨다. 허용되지 않는 전이면 상태를 바꾸지 않고 false를 돌려준다.
+    // (이미 확정된 결과를 뒤집지 않기 위한 장치. 호출 순서에 대한 암묵적 가정에 기대지 않는다.)
+    //   markProcessing : READY                         -> PROCESSING
+    //   releaseToReady : PROCESSING                    -> READY
+    //   issueSuccess   : READY / PROCESSING / ISSUE_FAIL -> UNUSED   (타임아웃 후 늦게 온 성공이 실패를 "승급")
+    //   issueFail      : READY / PROCESSING            -> ISSUE_FAIL (이미 성공한 건은 실패로 덮어쓰지 않음)
+
     /** 배치가 이 건을 선점했음을 표시 (발행처 요청 직전). */
-    public void markProcessing() {
+    public boolean markProcessing() {
+        if (status != OrderDetailStatus.READY) {
+            return false;
+        }
         this.status = OrderDetailStatus.PROCESSING;
+        return true;
     }
 
     /** 발행처에 요청을 보내지 못한 경우 등, 다시 대기 상태로 되돌린다. */
-    public void releaseToReady() {
+    public boolean releaseToReady() {
+        if (status != OrderDetailStatus.PROCESSING) {
+            return false;
+        }
         this.status = OrderDetailStatus.READY;
+        return true;
     }
 
     /** 쿠폰 발행 성공 처리 */
-    public void issueSuccess(String pin, String issuerTrxId, LocalDate validStartDate, LocalDate validEndDate) {
+    public boolean issueSuccess(String pin, String issuerTrxId, LocalDate validStartDate, LocalDate validEndDate) {
+        if (status != OrderDetailStatus.READY
+                && status != OrderDetailStatus.PROCESSING
+                && status != OrderDetailStatus.ISSUE_FAIL) {
+            return false;
+        }
         this.pin = pin;
         this.issuerTrxId = issuerTrxId;
         this.validStartDate = validStartDate;
         this.validEndDate = validEndDate;
         this.status = OrderDetailStatus.UNUSED;
+        return true;
     }
 
     /** 쿠폰 발행 실패 처리 */
-    public void issueFail() {
+    public boolean issueFail() {
+        if (status != OrderDetailStatus.READY && status != OrderDetailStatus.PROCESSING) {
+            return false;
+        }
         this.status = OrderDetailStatus.ISSUE_FAIL;
+        return true;
     }
 }
