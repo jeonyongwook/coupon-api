@@ -1,0 +1,17 @@
+# 로컬 실행용 MariaDB. 기본 접속 정보는 application.properties의 기본값(root/system)과 같다.
+# SKIP LOCKED(발행 배치의 다중 인스턴스 안전 선점)를 쓰므로 MariaDB 10.6+ 이상을 사용한다.
+services:
+  mariadb:
+    image: mariadb:10.11
+    container_name: coupon-api-db
+    environment:
+      MARIADB_ROOT_PASSWORD: system
+      MARIADB_DATABASE: coupon-api
+    ports:
+      - "3306:3306"
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - coupon-api-db-data:/var/lib/mysql
+
+volumes:
+  coupon-api-db-data:
