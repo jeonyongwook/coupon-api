@@ -110,8 +110,16 @@ stateDiagram-v2
 ### 6. 대량 INSERT 성능
 주문 1건에 최대 1,000개의 상세가 생성됩니다. `IDENTITY` 채번은 Hibernate의 insert 배치를 막으므로 `OrderDetail`은
 `SEQUENCE(allocationSize=50)`을 쓰고, `hibernate.jdbc.batch_size=50`, `rewriteBatchedStatements=true`를 함께 설정했습니다.
-JDBC 배치 설정 적용 여부에 따른 주문 접수 시간은 `./gradlew benchmark`(Docker 필요)로 직접 측정할 수 있습니다.
-수치는 실행 환경에 따라 달라 이 문서에는 아직 기재하지 않았습니다.
+주문 1건(상세 1,000건) 접수 시간을 로컬 Docker의 MariaDB 10.11에서 측정했습니다
+(`./gradlew benchmark`, 워밍업 2회 후 5회 측정).
+
+| 설정 | 중앙값 | 최소~최대 |
+|---|---|---|
+| JDBC 배치 OFF | 539ms | 489~584ms |
+| JDBC 배치 ON (`batch_size=50`, `order_inserts`, `rewriteBatchedStatements=true`) | 90ms | 59~123ms |
+
+배치 설정으로 약 6배 빨라졌습니다. 측정 시간에는 인증·상품 조회가 함께 포함되어 있고 로컬 환경의 값이므로,
+절대 수치보다 설정 전후의 상대 비교로 봐 주세요. (비교 대상은 IDENTITY와 SEQUENCE가 아니라 JDBC 배치 설정 ON/OFF입니다.)
 
 ### 7. 보안
 - 고객 식별자(`customerKey`)는 본문에 평문으로 오가므로, 별도 시크릿(`X-API-KEY`)을 함께 검증합니다.
@@ -248,5 +256,5 @@ src/main/java/com
 - `ISSUE_FAIL` 건의 **자동 재시도 정책**이 없습니다 (재시도 횟수/간격, 최종 실패 알림).
 - 스키마는 `ddl-auto=update`로 관리합니다. 운영에서는 Flyway/Liquibase 마이그레이션이 필요합니다.
 - 연관 관계를 FK 객체 매핑 대신 ID 값으로 들고 있어 DB 레벨 FK 제약이 없습니다. (대량 배치 처리 시 의도적으로 단순화했으나, 운영에서는 제약 추가를 검토해야 합니다.)
-- 배치 insert 효과를 측정하는 코드는 있으나(`./gradlew benchmark`) **결과 수치는 아직 문서화하지 않았고**, 발행 처리량(배치 회차당 건수, 스레드풀 크기별) 측정은 하지 않았습니다.
+- 주문 접수의 배치 insert 효과는 측정했지만, 발행 처리량(배치 회차당 건수, 스레드풀 크기별) 측정은 하지 않았습니다.
 - 요청 속도 제한(rate limit), 고객사 API 키 발급·재발급 API는 범위 밖입니다.
