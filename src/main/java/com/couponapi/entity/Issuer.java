@@ -21,7 +21,9 @@ public class Issuer {
     @Column(length = 30)
     private String businessNo;
 
-    private String status;  // OK, STOP, DEL
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private UseStatus status;
 
     @CreationTimestamp
     @Column(name = "reg_date", updatable = false)
@@ -31,9 +33,9 @@ public class Issuer {
     private LocalDateTime modDate;
 
     @Builder
-    public Issuer(String name, String businessNo, String status) {
+    public Issuer(String name, String businessNo, UseStatus status) {
         this.name = name;
         this.businessNo = businessNo;
-        this.status = status != null ? status : "OK";
+        this.status = status != null ? status : UseStatus.OK;
     }
 }

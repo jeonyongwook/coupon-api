@@ -39,7 +39,10 @@ public class AsyncConfig {
         // 1. 기본적으로 유지할 쓰레드 수 (평상시 동시 처리량) - system_config.CORE_POOL_SIZE
         executor.setCorePoolSize(corePoolSize);
 
-        // 2. 최대 생성 가능한 쓰레드 수 (폭주 시 처리량) - system_config.MAX_POOL_SIZE
+        // 2. 최대 생성 가능한 쓰레드 수 - system_config.MAX_POOL_SIZE
+        //    주의: ThreadPoolExecutor는 core가 다 찼을 때 먼저 "큐"에 쌓고, 큐가 가득 찬 뒤에야
+        //    core를 넘어 max까지 스레드를 늘린다. 배치는 1회차에 ISSUE_TRY_COUNT건만 제출하므로
+        //    (큐 크기 100보다 작으면) 평소에는 core 크기가 곧 동시 처리량이고 max는 거의 쓰이지 않는다.
         executor.setMaxPoolSize(maxPoolSize);
 
         // 3. 작업 대기 큐 크기 (메모리 상황에 맞게 조절)

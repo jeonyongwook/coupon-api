@@ -1,20 +1,30 @@
 package com.common.exception;
 
-import lombok.Getter;
 import org.springframework.http.HttpStatus;
 
-@Getter
 public class CouponApiException extends RuntimeException {
-    private final String errorCode;
-    private final HttpStatus httpStatus;
 
-    public CouponApiException(String errorCode, String message) {
-        this(errorCode, message, HttpStatus.BAD_REQUEST);
+    private final ErrorCode errorCode;
+
+    public CouponApiException(ErrorCode errorCode) {
+        super(errorCode.getMessage());
+        this.errorCode = errorCode;
     }
 
-    public CouponApiException(String errorCode, String message, HttpStatus httpStatus) {
+    public CouponApiException(ErrorCode errorCode, String message) {
         super(message);
         this.errorCode = errorCode;
-        this.httpStatus = httpStatus;
+    }
+
+    public ErrorCode getErrorCode() {
+        return errorCode;
+    }
+
+    public String getCode() {
+        return errorCode.getCode();
+    }
+
+    public HttpStatus getHttpStatus() {
+        return errorCode.getHttpStatus();
     }
 }

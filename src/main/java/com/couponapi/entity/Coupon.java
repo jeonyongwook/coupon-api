@@ -27,7 +27,9 @@ public class Coupon {
 
     private Integer validDays;
 
-    private String status;  // OK, STOP, DEL
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private UseStatus status;
 
     private String issuerGoodsCode;
 
@@ -49,17 +51,20 @@ public class Coupon {
     private LocalDateTime modDate;
 
     @Builder
-    public Coupon(String name, BigDecimal price, BigDecimal discountRate, Integer validDays, String status, String issuerGoodsCode, String customerGoodsCode, String msgSmsTemplate, String msgLmsTemplate, String msgMmsTemplate, String msgMmsImg) {
-        this.name 			= name;
-        this.price			= price;
-        this.discountRate	= discountRate;
-        this.validDays		= validDays;
-        this.status = status != null ? status : "OK";
-        this.issuerGoodsCode= issuerGoodsCode;
-        this.customerGoodsCode= customerGoodsCode;
-        this.msgSmsTemplate	= msgSmsTemplate;
-        this.msgLmsTemplate	= msgLmsTemplate;
-        this.msgMmsTemplate	= msgMmsTemplate;
-        this.msgMmsImg		= msgMmsImg;
+    public Coupon(Long issuerSeq, String name, BigDecimal price, BigDecimal discountRate, Integer validDays,
+                  UseStatus status, String issuerGoodsCode, String customerGoodsCode,
+                  String msgSmsTemplate, String msgLmsTemplate, String msgMmsTemplate, String msgMmsImg) {
+        this.issuerSeq = issuerSeq;
+        this.name = name;
+        this.price = price;
+        this.discountRate = discountRate;
+        this.validDays = validDays;
+        this.status = status != null ? status : UseStatus.OK;
+        this.issuerGoodsCode = issuerGoodsCode;
+        this.customerGoodsCode = customerGoodsCode;
+        this.msgSmsTemplate = msgSmsTemplate;
+        this.msgLmsTemplate = msgLmsTemplate;
+        this.msgMmsTemplate = msgMmsTemplate;
+        this.msgMmsImg = msgMmsImg;
     }
 }

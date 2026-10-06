@@ -19,16 +19,17 @@ public class Customer {
     @Column(unique = true, nullable = false, length = 20)
     private String customerKey;
 
-    // customerKey(식별자)와 쌍으로 쓰이는 인증용 시크릿.
-    // 요청 헤더(X-API-KEY)로 전달받아 검증한다 - customerKey는 body에 평문으로 오가는 식별자일 뿐이라
-    // 그것만으로 인증하면 그대로 도용될 수 있기 때문에 별도 비밀값을 둔다.
-    // TODO: 운영 반영 시에는 평문 저장 대신 해시(BCrypt 등)로 저장하고, 발급 시점에만 평문을 노출하는 방식으로 전환 권장.
+    // API 시크릿 키는 평문으로 저장하지 않고 SHA-256 해시(hex 64자)만 저장한다.
+    // 시크릿은 서버가 무작위로 발급하는 고엔트로피 값이라 BCrypt처럼 느린 해시까지는 필요 없고,
+    // DB가 유출돼도 원본 키를 알 수 없게 하는 것이 목적이다. (비교는 ApiKeyHasher + 상수 시간 비교)
     @Column(nullable = false, length = 64)
-    private String secretKey;
+    private String secretKeyHash;
 
     private String name;
 
-    private String status;  // OK, STOP, DEL
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private UseStatus status;
 
     @CreationTimestamp
     @Column(name = "reg_date", updatable = false)
@@ -38,10 +39,10 @@ public class Customer {
     private LocalDateTime modDate;
 
     @Builder
-    public Customer(String customerKey, String secretKey, String name, String status) {
+    public Customer(String customerKey, String secretKeyHash, String name, UseStatus status) {
         this.customerKey = customerKey;
-        this.secretKey = secretKey;
+        this.secretKeyHash = secretKeyHash;
         this.name = name;
-        this.status = status != null ? status : "OK";
+        this.status = status != null ? status : UseStatus.OK;
     }
 }
