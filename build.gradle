@@ -42,8 +42,30 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
     runtimeOnly 'org.mariadb.jdbc:mariadb-java-client'
+
+    // 실제 MariaDB 컨테이너로 SKIP LOCKED 동시 선점을 검증하는 테스트용 (Docker 필요, 없으면 해당 테스트만 건너뜀)
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:mariadb'
 }
 
 tasks.named('test') {
-    useJUnitPlatform()
+    // 성능 측정 테스트는 시간이 오래 걸리고 결과가 환경에 좌우되므로 기본 test/CI에서는 제외한다.
+    useJUnitPlatform {
+        excludeTags 'benchmark'
+    }
+}
+
+// 주문 접수(대량 INSERT) 성능 측정 전용 태스크. Docker 필요: ./gradlew benchmark
+tasks.register('benchmark', Test) {
+    description = '주문 접수 대량 INSERT 성능을 MariaDB 컨테이너에서 측정한다.'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform {
+        includeTags 'benchmark'
+    }
+    testLogging {
+        showStandardStreams = true
+    }
+    outputs.upToDateWhen { false }
 }

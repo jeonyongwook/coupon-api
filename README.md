@@ -7,6 +7,16 @@
 주문 접수(동기)와 쿠폰 발행(비동기)을 분리하고, 발행처 응답 지연·타임아웃·중복 요청·서버 다중 실행 같은
 **실제 운영에서 문제가 되는 상황을 코드와 테스트로 다룬 것**이 이 프로젝트의 중심입니다.
 
+## 한눈에 보기
+
+| 운영에서 생기는 문제 | 선택한 해법 | 확인 방법 |
+|---|---|---|
+| 네트워크 재시도로 같은 주문이 두 번 접수됨 | `customerTrxId` 멱등 처리, 동시 요청은 DB 유니크 제약이 최종 보증하고 위반 시 새 트랜잭션에서 재조회 | `OrderServiceTest` (동시 8스레드 → 주문 1건) |
+| 서버를 여러 대 띄우면 같은 건을 중복 발행 | `SELECT ... FOR UPDATE SKIP LOCKED`로 짧은 트랜잭션에서 선점(READY → PROCESSING), 발행처 호출 중에는 DB 락을 쥐지 않음 | `ClaimConcurrencyMariaDbTest` (실제 MariaDB, 4개 커넥션 동시 선점) |
+| 발행처 지연·타임아웃 | 스레드가 실제로 시작한 시점부터 타임아웃 계산, 원본 future는 살려 두어 늦게 온 성공 응답도 `UNUSED`로 반영(핀 유실 방지) | `CouponIssueResultWriterTest` |
+| 응답 순서가 뒤바뀌어 확정된 결과가 뒤집힘 | 각 결과 반영 메서드가 상태 전이를 스스로 가드 | `CouponIssueResultWriterTest` |
+| 외부 호출 대기 중 DB 커넥션 점유 | 배치 전체에 `@Transactional`을 걸지 않고 선점·결과 반영만 짧은 트랜잭션으로 분리 | 코드 구조 (`Claimer` / `ResultWriter`) |
+
 ## 기술 스택
 
 | 구분 | 사용 기술 |
@@ -15,7 +25,7 @@
 | DB | MariaDB 10.6+ (운영/로컬), H2 인메모리 (테스트) |
 | Build / CI | Gradle, GitHub Actions |
 | 문서 | springdoc-openapi (Swagger UI) |
-| 테스트 | JUnit 5, AssertJ, MockMvc (통합 테스트 23개) |
+| 테스트 | JUnit 5, AssertJ, MockMvc, Testcontainers(MariaDB) (통합 테스트 24개) |
 
 ## 전체 흐름
 
@@ -100,7 +110,8 @@ stateDiagram-v2
 ### 6. 대량 INSERT 성능
 주문 1건에 최대 1,000개의 상세가 생성됩니다. `IDENTITY` 채번은 Hibernate의 insert 배치를 막으므로 `OrderDetail`은
 `SEQUENCE(allocationSize=50)`을 쓰고, `hibernate.jdbc.batch_size=50`, `rewriteBatchedStatements=true`를 함께 설정했습니다.
-(실측 비교 수치는 아직 측정하지 않았습니다.)
+JDBC 배치 설정 적용 여부에 따른 주문 접수 시간은 `./gradlew benchmark`(Docker 필요)로 직접 측정할 수 있습니다.
+수치는 실행 환경에 따라 달라 이 문서에는 아직 기재하지 않았습니다.
 
 ### 7. 보안
 - 고객 식별자(`customerKey`)는 본문에 평문으로 오가므로, 별도 시크릿(`X-API-KEY`)을 함께 검증합니다.
@@ -158,8 +169,8 @@ curl -i "http://localhost:8087/api/v1/orders/TX-3F9A...?customerKey=DEMO_CUSTOME
 | E003 | 409 | 같은 `customerTrxId`로 **다른 내용**의 주문 |
 | E004 | 403 | 정지/삭제된 고객사 |
 | E005 | 404 | 주문 없음 (타 고객사 주문 포함) |
-| E010 | 401 | API 키 누락/불일치, 존재하지 않는 고객사 |
 | E009 | 409 | 그 밖의 데이터 충돌 |
+| E010 | 401 | API 키 누락/불일치, 존재하지 않는 고객사 |
 | E999 | 500 | 서버 오류 |
 
 ## 실행 방법
@@ -195,7 +206,9 @@ docker compose up -d
 ./gradlew test
 ```
 
-운영 DB 없이 인메모리 H2(MariaDB 호환 모드)에서 실행되며, 스케줄러는 꺼 두고 테스트가 배치를 직접 호출해 결정적으로 검증합니다.
+기본 테스트는 운영 DB 없이 인메모리 H2(MariaDB 호환 모드)에서 실행되며, 스케줄러는 꺼 두고 테스트가 배치를 직접 호출해 결정적으로 검증합니다.
+`SKIP LOCKED` 동작만은 H2로 MariaDB와 같다고 보장할 수 없어, 이 부분은 Testcontainers의 실제 MariaDB로 따로 검증합니다
+(Docker가 없으면 해당 테스트만 건너뜁니다. GitHub Actions의 ubuntu 러너에서는 Docker가 기본 제공되어 CI에서 함께 실행됩니다).
 
 | 테스트 | 검증 내용 |
 |---|---|
@@ -203,6 +216,9 @@ docker compose up -d
 | `CouponIssueResultWriterTest` | 지연 성공의 승급, 성공 건 미덮어쓰기, 주문 완료 전환 조건·멱등, 대기 복귀, 멈춘 건 복구 |
 | `CouponIssueBatchTest` | 배치 1회 실행으로 전건 발행·주문 완료, 선점 중복 방지, 선점 개수 제한 |
 | `OrderApiTest` | 상태 코드(202/400/401/404), 깨진 JSON, 타 고객사 주문 조회 차단 |
+| `ClaimConcurrencyMariaDbTest` | **실제 MariaDB**에서 여러 커넥션이 동시에 선점해도 중복·유실 없이 전 건이 한 번씩만 선점됨 (`SKIP LOCKED`) |
+
+성능 측정(`OrderInsertBatchOn/OffBenchmark`)은 `@Tag("benchmark")`로 기본 `test`와 CI에서 제외되며, `./gradlew benchmark`로만 실행됩니다.
 
 ## 프로젝트 구조
 
@@ -223,11 +239,14 @@ src/main/java/com
     └── dto
 ```
 
+`Main`은 루트 패키지(`com`)에 두어 공통 모듈(`com.common`)과 도메인 모듈(`com.couponapi`)을 형제 패키지로 함께 컴포넌트 스캔합니다.
+공통 설정·예외·보안은 `common`, 쿠폰 주문 도메인은 `couponapi`로 나눠 두었습니다.
+
 ## 한계와 다음 단계
 
 - **발행처 연동은 mock**입니다. 실제 연동 시에는 발행처 조회 API로 `ISSUE_FAIL` 건의 실제 발급 여부를 대조(reconciliation)하는 단계가 필요합니다.
 - `ISSUE_FAIL` 건의 **자동 재시도 정책**이 없습니다 (재시도 횟수/간격, 최종 실패 알림).
 - 스키마는 `ddl-auto=update`로 관리합니다. 운영에서는 Flyway/Liquibase 마이그레이션이 필요합니다.
 - 연관 관계를 FK 객체 매핑 대신 ID 값으로 들고 있어 DB 레벨 FK 제약이 없습니다. (대량 배치 처리 시 의도적으로 단순화했으나, 운영에서는 제약 추가를 검토해야 합니다.)
-- 부하/동시성 **성능 수치 측정**(배치 insert 효과, 처리량)은 아직 하지 않았습니다.
+- 배치 insert 효과를 측정하는 코드는 있으나(`./gradlew benchmark`) **결과 수치는 아직 문서화하지 않았고**, 발행 처리량(배치 회차당 건수, 스레드풀 크기별) 측정은 하지 않았습니다.
 - 요청 속도 제한(rate limit), 고객사 API 키 발급·재발급 API는 범위 밖입니다.

@@ -1,0 +1,8 @@
+# 줄바꿈을 LF로 통일 (Windows autocrlf 때문에 git status에 가짜 변경이 뜨는 것을 방지)
+* text=auto eol=lf
+
+# Windows 전용 스크립트는 CRLF 유지
+*.bat text eol=crlf
+
+# 바이너리
+*.jar binary

@@ -10,8 +10,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-// CORS를 열어야 한다면 origins에 "*" 대신 허용할 도메인을 명시할 것.
-// "*"은 자격증명(API 키)을 다루는 API에서는 어떤 출처에서든 요청을 보낼 수 있게 되어 위험하다.
 @RestController
 @RequestMapping("/api/v1")
 @RequiredArgsConstructor
